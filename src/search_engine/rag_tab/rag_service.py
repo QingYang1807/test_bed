@@ -13,8 +13,8 @@ from typing import List, Dict, Tuple, Optional, Any
 from datetime import datetime
 
 # ==================== LLM 调用 ====================
-def call_llm(messages, model="qwen-max"):
-    """调用 LLM"""
+def call_llm_dashscope(messages, model="qwen-max"):
+    """调用 DashScope API (阿里云通义千问)"""
     try:
         from openai import OpenAI
         client = OpenAI(
@@ -28,7 +28,63 @@ def call_llm(messages, model="qwen-max"):
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"LLM调用失败: {str(e)}"
+        return f"DashScope API调用失败: {str(e)}"
+
+def call_llm_siliconflow(messages, model="Qwen/Qwen3-8B"):
+    """调用硅基流动 API"""
+    try:
+        url = "https://api.siliconflow.cn/v1/chat/completions"
+        api_key = os.getenv("SILICONFLOW_API_KEY", "")
+        
+        if not api_key:
+            return "❌ 错误：未设置 SILICONFLOW_API_KEY 环境变量。\n请设置环境变量：\nWindows: set SILICONFLOW_API_KEY=your_api_key\nLinux/Mac: export SILICONFLOW_API_KEY=your_api_key\n\n您可以在 https://siliconflow.cn 注册并获取免费 API Key。"
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.3
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        response.raise_for_status()
+        
+        result = response.json()
+        if "choices" in result and len(result["choices"]) > 0:
+            return result["choices"][0]["message"]["content"]
+        else:
+            return f"硅基流动API返回格式异常: {result}"
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"HTTP错误: {e.response.status_code}"
+        try:
+            error_detail = e.response.json()
+            if "error" in error_detail:
+                error_msg += f" - {error_detail['error']}"
+        except:
+            pass
+        return f"❌ 硅基流动API调用失败: {error_msg}"
+    except requests.exceptions.RequestException as e:
+        return f"❌ 硅基流动API调用失败: {str(e)}"
+    except Exception as e:
+        return f"❌ 硅基流动API调用异常: {str(e)}"
+
+def call_llm(messages, model="qwen-max", api_provider="dashscope"):
+    """
+    调用 LLM (统一接口)
+    
+    Args:
+        messages: 消息列表
+        model: 模型名称
+        api_provider: API提供商 ("dashscope" 或 "siliconflow")
+    """
+    if api_provider == "siliconflow":
+        return call_llm_siliconflow(messages, model)
+    else:
+        return call_llm_dashscope(messages, model)
 
 class RAGService:
     """RAG服务：基于倒排索引的检索增强生成"""
@@ -43,7 +99,8 @@ class RAGService:
         """
         self.index_service = index_service
         self.ollama_url = ollama_url
-        self.default_model = "qwen-max"  # 改为DashScope模型
+        self.default_api_provider = "siliconflow"  # 默认使用硅基流动
+        self.default_model = "Qwen/Qwen3-8B"  # 默认使用硅基流动的免费模型
         
     def check_ollama_connection(self) -> Tuple[bool, str]:
         """检查Ollama连接状态 (保留兼容性)"""
@@ -58,45 +115,77 @@ class RAGService:
         except requests.exceptions.RequestException as e:
             return False, f"❌ Ollama连接失败: {str(e)}"
     
-    def get_available_models(self) -> List[str]:
+    def get_available_models(self, api_provider: str = None) -> Dict[str, List[str]]:
         """获取可用的模型列表"""
-        # 返回DashScope可用模型
-        return ["qwen-max", "qwen-plus", "qwen-turbo", "qwen2.5-72b-instruct"]
+        if api_provider is None:
+            api_provider = self.default_api_provider
+        
+        models = {
+            "siliconflow": [
+                "Qwen/Qwen3-8B",
+                "Qwen/QwQ-32B",
+                "Qwen/Qwen2.5-72B-Instruct",
+                "deepseek-ai/DeepSeek-V2.5",
+                "meta-llama/Llama-3.1-8B-Instruct"
+            ],
+            "dashscope": [
+                "qwen-max",
+                "qwen-plus",
+                "qwen-turbo",
+                "qwen2.5-72b-instruct"
+            ]
+        }
+        return models.get(api_provider, models["siliconflow"])
     
     def retrieve_documents(self, query: str, top_k: int = 5) -> List[Tuple[str, float, str]]:
         """
-        使用倒排索引检索相关文档
+        使用倒排索引检索相关文档（基于TF-IDF）
         
         Args:
             query: 查询字符串
             top_k: 返回top_k个文档
             
         Returns:
-            List[Tuple[str, float, str]]: (doc_id, score, content)
+            List[Tuple[str, float, str]]: (doc_id, score, content) - content是完整文档内容
         """
         try:
-            # 使用现有的索引服务进行检索
+            # 使用现有的索引服务进行检索（TF-IDF检索）
             results = self.index_service.search(query, top_k)
-            print(f"📖 检索到 {len(results)} 个相关文档")
-            return results
+            print(f"📖 TF-IDF检索到 {len(results)} 个相关文档")
+            
+            # 将摘要替换为完整文档内容
+            full_results = []
+            for doc_id, score, summary in results:
+                # 获取完整文档内容
+                full_content = self.index_service.get_document(doc_id)
+                if full_content:
+                    full_results.append((doc_id, score, full_content))
+                else:
+                    # 如果获取失败，使用摘要
+                    full_results.append((doc_id, score, summary))
+            
+            return full_results
         except Exception as e:
             print(f"❌ 文档检索失败: {e}")
             return []
     
-    def generate_answer(self, query: str, context: str, model: Optional[str] = None) -> str:
+    def generate_answer(self, query: str, context: str, model: Optional[str] = None, api_provider: Optional[str] = None) -> str:
         """
-        使用DashScope生成回答
+        生成回答
         
         Args:
             query: 用户查询
             context: 检索到的上下文
             model: 使用的模型名称
+            api_provider: API提供商 ("dashscope" 或 "siliconflow")
             
         Returns:
             str: 生成的回答
         """
         if model is None:
             model = self.default_model
+        if api_provider is None:
+            api_provider = self.default_api_provider
             
         # 构建提示词
         system_prompt = """你是一个专业的AI助手，请基于提供的上下文信息回答用户问题。如果上下文中没有相关信息，请说明无法根据提供的信息回答。请用中文回答。"""
@@ -112,29 +201,32 @@ class RAGService:
         ]
         
         try:
-            return call_llm(messages, model)
+            return call_llm(messages, model, api_provider)
         except Exception as e:
             return f"❌ 调用LLM失败: {str(e)}"
     
-    def generate_answer_with_prompt(self, prompt: str, model: Optional[str] = None) -> str:
+    def generate_answer_with_prompt(self, prompt: str, model: Optional[str] = None, api_provider: Optional[str] = None) -> str:
         """
         直接使用提示词生成回答
         
         Args:
             prompt: 完整的提示词
             model: 使用的模型名称
+            api_provider: API提供商 ("dashscope" 或 "siliconflow")
             
         Returns:
             str: 生成的回答
         """
         if model is None:
             model = self.default_model
+        if api_provider is None:
+            api_provider = self.default_api_provider
             
         try:
             messages = [
                 {"role": "user", "content": prompt}
             ]
-            return call_llm(messages, model)
+            return call_llm(messages, model, api_provider)
         except Exception as e:
             return f"❌ 调用LLM失败: {str(e)}"
     
@@ -250,7 +342,7 @@ class RAGService:
         trace_lines.append("系统: 未检测到FINISH，已进行自动总结。")
         return answer, "\n\n".join(trace_lines)
 
-    def rag_query(self, query: str, top_k: int = 5, model: Optional[str] = None, retrieval_enabled: bool = True, multi_step: bool = False) -> Dict[str, Any]:
+    def rag_query(self, query: str, top_k: int = 5, model: Optional[str] = None, retrieval_enabled: bool = True, multi_step: bool = False, api_provider: Optional[str] = None) -> Dict[str, Any]:
         """
         执行RAG查询
         
@@ -260,23 +352,30 @@ class RAGService:
             model: 使用的模型
             retrieval_enabled: 是否开启检索增强
             multi_step: 是否开启多步推理
+            api_provider: API提供商 ("dashscope" 或 "siliconflow")
             
         Returns:
             Dict: 包含检索结果和生成答案的字典
         """
         start_time = datetime.now()
         
+        if api_provider is None:
+            api_provider = self.default_api_provider
+        if model is None:
+            model = self.default_model
+        
         # 如果关闭检索与多步推理，则直接问 LLM（无上下文直连）
         if not retrieval_enabled and not multi_step:
             direct_prompt = f"请用中文回答用户问题：\n\n问题：{query}"
-            answer = self.generate_answer_with_prompt(direct_prompt, model)
+            answer = self.generate_answer_with_prompt(direct_prompt, model, api_provider)
             return {
                 "query": query,
                 "retrieved_docs": [],
                 "context": "",
                 "answer": answer,
                 "processing_time": (datetime.now() - start_time).total_seconds(),
-                "model_used": model or self.default_model,
+                "model_used": model,
+                "api_provider": api_provider,
                 "prompt_sent": direct_prompt
             }
 
@@ -311,7 +410,7 @@ class RAGService:
 用户问题：{query}
             
 请用中文回答："""
-            answer = self.generate_answer_with_prompt(prompt, model)
+            answer = self.generate_answer_with_prompt(prompt, model, api_provider)
             prompt_used = prompt
         
         processing_time = (datetime.now() - start_time).total_seconds()
@@ -322,7 +421,8 @@ class RAGService:
             "context": context,
             "answer": answer,
             "processing_time": processing_time,
-            "model_used": model or self.default_model,
+            "model_used": model,
+            "api_provider": api_provider,
             "prompt_sent": prompt_used if prompt_used is not None else "多步推理（内部多提示）"
         }
     
@@ -331,10 +431,21 @@ class RAGService:
         index_stats = self.index_service.get_stats()
         ollama_connected, ollama_status = self.check_ollama_connection()
         
+        # 检查 API Key 配置
+        dashscope_key = os.getenv("DASHSCOPE_API_KEY", "")
+        siliconflow_key = os.getenv("SILICONFLOW_API_KEY", "")
+        
         return {
             "ollama_connected": ollama_connected,
             "ollama_status": ollama_status,
             "ollama_url": self.ollama_url,
-            "available_models": self.get_available_models(),
+            "default_api_provider": self.default_api_provider,
+            "default_model": self.default_model,
+            "dashscope_configured": bool(dashscope_key),
+            "siliconflow_configured": bool(siliconflow_key),
+            "available_models": {
+                "siliconflow": self.get_available_models("siliconflow"),
+                "dashscope": self.get_available_models("dashscope")
+            },
             "index_stats": index_stats
         } 

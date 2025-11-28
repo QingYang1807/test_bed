@@ -27,21 +27,42 @@ def build_rag_tab(index_service, inference_model=None):
     
     with gr.Column():
         gr.Markdown("""
-        # 🤖 上下文工程
+        # 🤖 上下文工程 - TF-IDF RAG
         
-        支持两种模式：
+        支持三种模式：
+        - **硅基流动 API**: 使用硅基流动免费模型（推荐，免费额度充足）
         - **DashScope API**: 使用阿里云通义千问API（在线）
         - **本地模型**: 使用训练好的SFT/DPO模型（需先加载）
+        
+        **TF-IDF 检索**: 基于倒排索引的文档检索，自动将相关文档插入到提示词中
         """)
         
         # 1. 模型选择与加载
         with gr.Row():
             with gr.Column(scale=2):
                 inference_mode = gr.Radio(
-                    choices=["DashScope API", "本地模型"],
-                    value="DashScope API",
+                    choices=["硅基流动 API", "DashScope API", "本地模型"],
+                    value="硅基流动 API",
                     label="推理模式"
                 )
+                
+                # API 模型选择（仅在选择API模式时显示）
+                with gr.Column(visible=True) as api_model_box:
+                    with gr.Row():
+                        api_provider_dropdown = gr.Dropdown(
+                            choices=["硅基流动 API", "DashScope API"],
+                            value="硅基流动 API",
+                            label="API 提供商",
+                            scale=2
+                        )
+                        # 初始化时获取可用模型
+                        initial_models = rag_service.get_available_models("siliconflow")
+                        api_model_dropdown = gr.Dropdown(
+                            choices=initial_models,
+                            value=initial_models[0] if initial_models else "Qwen/Qwen3-8B",
+                            label="选择模型",
+                            scale=3
+                        )
                 
                 # 本地模型选择（仅在选择"本地模型"时显示）
                 with gr.Column(visible=False) as local_model_box:
@@ -62,7 +83,7 @@ def build_rag_tab(index_service, inference_model=None):
             with gr.Column(scale=1):
                 model_status = gr.Textbox(
                     label="模型状态",
-                    value="DashScope API 模式（无需加载）",
+                    value="硅基流动 API 模式（无需加载）",
                     interactive=False,
                     lines=4
             )
@@ -164,14 +185,29 @@ def build_rag_tab(index_service, inference_model=None):
             print(f"❌ 刷新模型列表失败: {e}")
             return gr.update(choices=[], value=None)
     
+    def update_api_models(provider):
+        """根据API提供商更新可用模型列表"""
+        models = rag_service.get_available_models()
+        if provider == "硅基流动 API":
+            available_models = models.get("siliconflow", ["Qwen/Qwen3-8B"])
+            return gr.update(choices=available_models, value=available_models[0] if available_models else None)
+        else:  # DashScope API
+            available_models = models.get("dashscope", ["qwen-max"])
+            return gr.update(choices=available_models, value=available_models[0] if available_models else None)
+    
     def toggle_model_box(mode):
         """切换推理模式时显示/隐藏本地模型选择框"""
         if mode == "本地模型":
             status = "请选择并加载本地模型" if not inference_model.loaded else "模型已加载"
             # 切换到本地模型时，自动刷新模型列表
-            return gr.update(visible=True), status, refresh_local_models()
+            return gr.update(visible=False), gr.update(visible=True), status, refresh_local_models()
         else:
-            return gr.update(visible=False), "DashScope API 模式（无需加载）", gr.update()
+            # API 模式
+            if mode == "硅基流动 API":
+                status = "硅基流动 API 模式（无需加载）\n提示：需要设置环境变量 SILICONFLOW_API_KEY"
+            else:
+                status = "DashScope API 模式（无需加载）\n提示：需要设置环境变量 DASHSCOPE_API_KEY"
+            return gr.update(visible=True), gr.update(visible=False), status, gr.update()
     
     def load_local_model(model_path):
         """加载本地模型"""
@@ -196,8 +232,8 @@ def build_rag_tab(index_service, inference_model=None):
         """获取RAG服务统计信息"""
         return rag_service.get_stats()
     
-    def process_rag_query(query: str, top_k: int, mode: str, retrieval_enabled_flag: bool, multi_step_flag: bool):
-        """处理RAG查询（支持DashScope API和本地模型）"""
+    def process_rag_query(query: str, top_k: int, mode: str, api_provider: str, api_model: str, retrieval_enabled_flag: bool, multi_step_flag: bool):
+        """处理RAG查询（支持硅基流动API、DashScope API和本地模型）"""
         if not query.strip():
             return (
                 "请输入您的问题",
@@ -208,15 +244,17 @@ def build_rag_tab(index_service, inference_model=None):
             )
         
         # 根据模式选择推理方式
-        if mode == "DashScope API":
-            # 使用DashScope API
+        if mode in ["硅基流动 API", "DashScope API"]:
+            # 使用API模式
+            api_provider_name = "siliconflow" if mode == "硅基流动 API" else "dashscope"
             result = rag_service.rag_query(
-            query=query,
-            top_k=top_k,
-                model="qwen-plus",  # 使用通义千问
-            retrieval_enabled=retrieval_enabled_flag,
-            multi_step=multi_step_flag
-        )
+                query=query,
+                top_k=top_k,
+                model=api_model,
+                api_provider=api_provider_name,
+                retrieval_enabled=retrieval_enabled_flag,
+                multi_step=multi_step_flag
+            )
         else:
             # 使用本地模型
             if not inference_model.loaded:
@@ -288,6 +326,8 @@ def build_rag_tab(index_service, inference_model=None):
         # 构建处理信息
         processing_info = f"""处理时间: {result.get('processing_time', 0):.2f}秒
 推理模式: {mode}
+API提供商: {result.get('api_provider', 'N/A')}
+模型: {result.get('model_used', 'N/A')}
 检索文档数: {len(result.get('retrieved_docs', []))}"""
         
         return (
@@ -300,11 +340,18 @@ def build_rag_tab(index_service, inference_model=None):
     
     # 绑定事件
     
+    # API提供商切换事件
+    api_provider_dropdown.change(
+        fn=update_api_models,
+        inputs=[api_provider_dropdown],
+        outputs=[api_model_dropdown]
+    )
+    
     # 推理模式切换事件
     inference_mode.change(
         fn=toggle_model_box,
         inputs=[inference_mode],
-        outputs=[local_model_box, model_status, local_model_dropdown]
+        outputs=[api_model_box, local_model_box, model_status, local_model_dropdown]
     )
     
     # 刷新本地模型列表
@@ -328,7 +375,7 @@ def build_rag_tab(index_service, inference_model=None):
     # RAG查询事件
     rag_query_btn.click(
         fn=process_rag_query,
-        inputs=[query_input, top_k_slider, inference_mode, retrieval_enabled, multi_step_enabled],
+        inputs=[query_input, top_k_slider, inference_mode, api_provider_dropdown, api_model_dropdown, retrieval_enabled, multi_step_enabled],
         outputs=[answer_output, processing_info, retrieved_docs, context_output, prompt_display]
     )
     

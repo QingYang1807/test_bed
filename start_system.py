@@ -15,6 +15,16 @@ import asyncio
 from typing import List, Optional
 from urllib import request, error
 
+# 设置Windows控制台编码为UTF-8，以支持emoji显示
+if sys.platform == 'win32':
+    try:
+        # 尝试设置控制台编码为UTF-8
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except:
+        pass
+
 def load_env_file():
     """加载 .env 文件中的环境变量"""
     env_file = ".env"
@@ -47,6 +57,22 @@ def check_dependencies():
     """检查必要的依赖是否已安装"""
     print("\n🔍 步骤1: 检查系统依赖")
     print("-" * 30)
+    print(f"🐍 使用Python: {sys.executable}")
+    
+    # 检查是否在虚拟环境中运行
+    in_venv = (
+        hasattr(sys, 'real_prefix') or 
+        (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix) or
+        'venv' in sys.executable.lower() or
+        'virtualenv' in sys.executable.lower()
+    )
+    if not in_venv:
+        print("⚠️  警告: 未检测到虚拟环境，建议在虚拟环境中运行")
+        print("   如果依赖检查失败，请先激活虚拟环境:")
+        print("   Windows: .\\venv\\Scripts\\Activate.ps1")
+        print("   Linux/Mac: source venv/bin/activate")
+    else:
+        print("✅ 检测到虚拟环境")
     
     required_packages = [
         ('gradio', 'gradio>=4.0.0'),
@@ -61,15 +87,25 @@ def check_dependencies():
     missing_packages = []
     for package, requirement in required_packages:
         try:
-            spec = importlib.util.find_spec(package)
-            if spec is None:
-                missing_packages.append(requirement)
-                print(f"❌ 缺少依赖: {requirement}")
-            else:
+            # 实际尝试导入包，这样更准确
+            __import__(package)
+            # 如果导入成功，尝试获取版本信息（可选）
+            try:
+                mod = sys.modules[package]
+                version = getattr(mod, '__version__', 'unknown')
+                if version != 'unknown':
+                    print(f"✅ 已安装: {package} (版本: {version})")
+                else:
+                    print(f"✅ 已安装: {package}")
+            except:
                 print(f"✅ 已安装: {package}")
         except ImportError:
             missing_packages.append(requirement)
             print(f"❌ 缺少依赖: {requirement}")
+        except Exception as e:
+            # 其他异常也视为缺少依赖
+            missing_packages.append(requirement)
+            print(f"❌ 缺少依赖: {requirement} (错误: {str(e)[:50]})")
     
     if missing_packages:
         print(f"\n❌ 发现 {len(missing_packages)} 个缺少的依赖包")
