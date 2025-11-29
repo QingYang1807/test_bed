@@ -6,7 +6,7 @@
     }
   },
   "domain_corpus": {
-    "file_name": "cpt/domain_corpus_20251115_213448.jsonl",
+    "file_name": "cpt/domain_corpus_20251129_233515.jsonl",
     "columns": {
       "prompt": "text"
     }
@@ -26,7 +26,7 @@
     }
   },
   "sft_data": {
-    "file_name": "sft/test_ui_sft.json",
+    "file_name": "sft/sft_data_20251128_194202.json",
     "formatting": "sharegpt",
     "columns": {
       "messages": "messages"

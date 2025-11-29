@@ -150,6 +150,7 @@ class CTRModelConfig:
                 'random_state': 42
             }
         },
+        # 将测试床项目中的现有 LR CTR 模型替换为 Wide & Deep 模型，实现特征记忆与泛化能力的融合。
         'wide_and_deep': {
             'name': 'Wide & Deep',
             'description': '结合线性模型和深度神经网络，效果更好',

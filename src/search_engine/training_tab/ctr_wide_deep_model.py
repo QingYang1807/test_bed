@@ -555,13 +555,22 @@ class WideAndDeepCTRModel:
             return False
         
         try:
-            os.makedirs("models", exist_ok=True)
+            # 确保目录存在
+            os.makedirs(os.path.dirname(model_path) if os.path.dirname(model_path) else "models", exist_ok=True)
+            
+            # 如果路径已经包含.h5扩展名，直接使用；否则添加.h5
+            if model_path.endswith('.h5'):
+                h5_path = model_path
+                preprocessor_path = model_path.replace('.h5', '_preprocessors.pkl')
+            else:
+                h5_path = f"{model_path}.h5"
+                preprocessor_path = f"{model_path}_preprocessors.pkl"
             
             # 保存TensorFlow模型
-            self.model.save(f"{model_path}.h5")
+            self.model.save(h5_path)
             
             # 保存预处理器
-            with open(f"{model_path}_preprocessors.pkl", 'wb') as f:
+            with open(preprocessor_path, 'wb') as f:
                 pickle.dump({
                     'wide_scaler': self.wide_scaler,
                     'deep_scaler': self.deep_scaler,
@@ -581,12 +590,20 @@ class WideAndDeepCTRModel:
             return False
         
         try:
-            if os.path.exists(f"{model_path}.h5"):
-                self.model = keras.models.load_model(f"{model_path}.h5")
+            # 如果路径已经包含.h5扩展名，直接使用；否则添加.h5
+            if model_path.endswith('.h5'):
+                h5_path = model_path
+                preprocessor_path = model_path.replace('.h5', '_preprocessors.pkl')
+            else:
+                h5_path = f"{model_path}.h5"
+                preprocessor_path = f"{model_path}_preprocessors.pkl"
+            
+            if os.path.exists(h5_path):
+                self.model = keras.models.load_model(h5_path)
                 
                 # 加载预处理器
-                if os.path.exists(f"{model_path}_preprocessors.pkl"):
-                    with open(f"{model_path}_preprocessors.pkl", 'rb') as f:
+                if os.path.exists(preprocessor_path):
+                    with open(preprocessor_path, 'rb') as f:
                         data = pickle.load(f)
                         self.wide_scaler = data.get('wide_scaler')
                         self.deep_scaler = data.get('deep_scaler')

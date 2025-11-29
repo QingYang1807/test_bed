@@ -581,7 +581,34 @@ def build_training_tab(model_service, data_service):
                         "<p>暂无特征重要性数据</p>"
                     )
                 
-                return train_ctr_model_direct(ctr_model, data_service, selected_model)
+                # 训练模型
+                result = train_ctr_model_direct(ctr_model, data_service, selected_model)
+                
+                # 训练成功后，更新model_service中的模型实例
+                if selected_model != "logistic_regression":
+                    try:
+                        # 创建并加载训练好的模型实例
+                        trained_model_instance = create_model_instance(selected_model)
+                        # 根据模型类型确定模型文件路径
+                        if selected_model == 'wide_and_deep':
+                            model_file = os.path.join("models", "offline", "wide_deep_ctr_model.h5")
+                        else:
+                            model_file = os.path.join("models", "offline", f"{selected_model}_ctr_model.pkl")
+                        
+                        # 加载训练好的模型
+                        if os.path.exists(model_file) or os.path.exists(model_file.replace('.h5', '.h5')):
+                            trained_model_instance.load_model(model_file)
+                            # 更新model_service中的模型实例
+                            model_service.model_instances[selected_model] = trained_model_instance
+                            model_service.current_model_type = selected_model
+                            # 如果当前使用的是训练的类型，也更新ctr_model
+                            if selected_model == model_service.current_model_type:
+                                model_service.ctr_model = trained_model_instance
+                    except Exception as e:
+                        print(f"⚠️ 更新模型服务实例失败: {e}")
+                        # 不影响训练结果的返回
+                
+                return result
             except Exception as e:
                 return (
                     f"<p style='color: red;'>❌ 训练函数调用失败: {str(e)}</p>",
@@ -686,7 +713,16 @@ def build_training_tab(model_service, data_service):
         def run_cross_validation(folds):
             """执行交叉验证"""
             try:
-                ctr_model = model_service.ctr_model if hasattr(model_service, 'ctr_model') else None
+                # 尝试获取当前模型类型对应的模型实例
+                current_model_type = getattr(model_service, 'current_model_type', 'logistic_regression')
+                ctr_model = None
+                
+                # 优先使用当前模型类型的实例
+                if current_model_type in model_service.model_instances:
+                    ctr_model = model_service.model_instances[current_model_type]
+                elif hasattr(model_service, 'ctr_model'):
+                    ctr_model = model_service.ctr_model
+                
                 if not ctr_model or not ctr_model.is_trained:
                     return "<p style='color: orange;'>⚠️ 请先训练模型</p>"
                 
@@ -696,12 +732,20 @@ def build_training_tab(model_service, data_service):
                 if len(records) < folds * 2:
                     return f"<p style='color: red;'>❌ 数据量不足，至少需要{folds * 2}条记录</p>"
                 
-                # 执行交叉验证
-                result = evaluator.cross_validate_model(
-                    ctr_model.model,
-                    records,
-                    cv_folds=int(folds)
-                )
+                # 执行交叉验证 - 对于Wide & Deep模型，需要特殊处理
+                if hasattr(ctr_model, 'model') and ctr_model.model is not None:
+                    result = evaluator.cross_validate_model(
+                        ctr_model.model,
+                        records,
+                        cv_folds=int(folds)
+                    )
+                else:
+                    # 如果没有model属性，使用模型实例本身
+                    result = evaluator.cross_validate_model(
+                        ctr_model,
+                        records,
+                        cv_folds=int(folds)
+                    )
                 
                 if 'error' in result:
                     return f"<p style='color: red;'>❌ {result['error']}</p>"
@@ -729,7 +773,16 @@ def build_training_tab(model_service, data_service):
         def run_interpretability_analysis(method, num_feat):
             """执行可解释性分析"""
             try:
-                ctr_model = model_service.ctr_model if hasattr(model_service, 'ctr_model') else None
+                # 尝试获取当前模型类型对应的模型实例
+                current_model_type = getattr(model_service, 'current_model_type', 'logistic_regression')
+                ctr_model = None
+                
+                # 优先使用当前模型类型的实例
+                if current_model_type in model_service.model_instances:
+                    ctr_model = model_service.model_instances[current_model_type]
+                elif hasattr(model_service, 'ctr_model'):
+                    ctr_model = model_service.ctr_model
+                
                 if not ctr_model or not ctr_model.is_trained:
                     return "<p style='color: orange;'>⚠️ 请先训练模型</p>"
                 
@@ -827,7 +880,16 @@ def build_training_tab(model_service, data_service):
         def run_fairness_analysis(group_by):
             """执行公平性分析"""
             try:
-                ctr_model = model_service.ctr_model if hasattr(model_service, 'ctr_model') else None
+                # 尝试获取当前模型类型对应的模型实例
+                current_model_type = getattr(model_service, 'current_model_type', 'logistic_regression')
+                ctr_model = None
+                
+                # 优先使用当前模型类型的实例
+                if current_model_type in model_service.model_instances:
+                    ctr_model = model_service.model_instances[current_model_type]
+                elif hasattr(model_service, 'ctr_model'):
+                    ctr_model = model_service.ctr_model
+                
                 if not ctr_model or not ctr_model.is_trained:
                     return "<p style='color: orange;'>⚠️ 请先训练模型</p>"
                 
