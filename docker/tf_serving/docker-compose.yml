@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  tensorflow-serving:
+    build:
+      context: ../..
+      dockerfile: docker/tf_serving/Dockerfile
+    image: testbed-tf-serving:latest
+    container_name: testbed-tf-serving
+    ports:
+      - "8500:8500"  # gRPC API
+      - "8501:8501"  # REST API
+    environment:
+      - MODEL_NAME=wide_and_deep_ctr
+      - MODEL_BASE_PATH=/models
+    volumes:
+      # 可选：挂载模型目录以便动态更新模型
+      - ../../models/wide_deep_ctr_model_tf_serving:/models/wide_and_deep_ctr
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/v1/models/wide_and_deep_ctr"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+

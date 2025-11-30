@@ -22,6 +22,12 @@ class ModelService:
         self.current_model_type = "logistic_regression"
         self.model_instances = {}  # 存储不同类型的模型实例
         
+        # TensorFlow Serving配置
+        self.use_tf_serving = os.getenv('USE_TF_SERVING', 'false').lower() == 'true'
+        self.tf_serving_url = os.getenv('TF_SERVING_URL', 'http://localhost:8501')
+        self.tf_serving_model_name = os.getenv('TF_SERVING_MODEL_NAME', 'wide_and_deep_ctr')
+        self.tf_serving_client = None
+        
         # 在线学习相关配置
         self.online_learning_enabled = False  # 在线学习开关
         self.online_model_base_dir = os.path.join(os.getcwd(), "models", "online")  # 在线模型目录
@@ -35,6 +41,10 @@ class ModelService:
         
         self._load_model()
         
+        # 初始化TensorFlow Serving客户端（如果启用）
+        if self.use_tf_serving:
+            self._init_tf_serving_client()
+        
         # Flask API 服务相关
         self.flask_app = None
         self.api_running = False
@@ -43,6 +53,24 @@ class ModelService:
         """确保在线和离线模型目录存在"""
         os.makedirs(self.online_model_base_dir, exist_ok=True)
         os.makedirs(self.offline_model_base_dir, exist_ok=True)
+    
+    def _init_tf_serving_client(self):
+        """初始化TensorFlow Serving客户端"""
+        try:
+            from .training_tab.tf_serving_client import TensorFlowServingClient
+            self.tf_serving_client = TensorFlowServingClient(
+                serving_url=self.tf_serving_url,
+                model_name=self.tf_serving_model_name
+            )
+            # 检查服务是否可用
+            if self.tf_serving_client.health_check():
+                print(f"✅ TensorFlow Serving客户端初始化成功: {self.tf_serving_url}")
+            else:
+                print(f"⚠️ TensorFlow Serving服务不可用: {self.tf_serving_url}")
+                self.tf_serving_client = None
+        except Exception as e:
+            print(f"❌ TensorFlow Serving客户端初始化失败: {e}")
+            self.tf_serving_client = None
     
     def _load_model(self):
         """加载模型（优先加载在线模型，如果不存在则加载离线模型）"""
@@ -446,6 +474,32 @@ class ModelService:
     def predict_ctr(self, features: Dict[str, Any], model_type: Optional[str] = None) -> float:
         """预测CTR"""
         try:
+            # 确定使用的模型类型
+            actual_model_type = model_type or self.current_model_type
+            
+            # 如果使用TensorFlow Serving且是Wide & Deep模型，则通过TF Serving调用
+            if (self.use_tf_serving and 
+                actual_model_type == 'wide_and_deep' and 
+                self.tf_serving_client is not None):
+                try:
+                    query = features.get('query', '')
+                    doc_id = features.get('doc_id', '')
+                    position = features.get('position', 1)
+                    score = features.get('score', 0.0)
+                    summary = features.get('summary', '')
+                    current_timestamp = features.get('timestamp')
+                    
+                    # 通过TensorFlow Serving进行预测
+                    ctr_prob = self.tf_serving_client.predict(
+                        query, doc_id, position, score, summary, current_timestamp
+                    )
+                    
+                    # 将CTR概率转换为分数加权（与直接调用模型保持一致）
+                    return float(score * (1 + ctr_prob))
+                except Exception as e:
+                    print(f"⚠️ TensorFlow Serving预测失败，回退到直接模型调用: {e}")
+                    # 回退到直接模型调用
+            
             # 始终使用指定类型的模型实例，确保使用最新训练的模型
             if model_type:
                 model_instance = self.get_model_instance(model_type)

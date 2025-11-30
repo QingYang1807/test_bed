@@ -550,11 +550,13 @@ class WideAndDeepCTRModel:
             return score
     
     def save_model(self, model_path: str = "models/wide_deep_ctr_model"):
-        """保存模型"""
+        """保存模型（同时保存H5格式和TensorFlow Serving格式）"""
         if not self.model:
             return False
         
         try:
+            self._check_tensorflow()
+            
             # 确保目录存在
             os.makedirs(os.path.dirname(model_path) if os.path.dirname(model_path) else "models", exist_ok=True)
             
@@ -562,12 +564,22 @@ class WideAndDeepCTRModel:
             if model_path.endswith('.h5'):
                 h5_path = model_path
                 preprocessor_path = model_path.replace('.h5', '_preprocessors.pkl')
+                tf_serving_path = model_path.replace('.h5', '_tf_serving')
             else:
                 h5_path = f"{model_path}.h5"
                 preprocessor_path = f"{model_path}_preprocessors.pkl"
+                tf_serving_path = f"{model_path}_tf_serving"
             
-            # 保存TensorFlow模型
+            # 保存TensorFlow模型（H5格式，用于直接加载）
             self.model.save(h5_path)
+            
+            # 保存为TensorFlow Serving格式（SavedModel）
+            os.makedirs(tf_serving_path, exist_ok=True)
+            # 使用版本号目录结构（TensorFlow Serving标准格式）
+            version_dir = os.path.join(tf_serving_path, "1")
+            os.makedirs(version_dir, exist_ok=True)
+            self.model.save(version_dir, save_format='tf')
+            print(f"✅ TensorFlow Serving格式模型已保存: {version_dir}")
             
             # 保存预处理器
             with open(preprocessor_path, 'wb') as f:
