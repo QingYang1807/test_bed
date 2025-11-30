@@ -82,6 +82,7 @@ def check_dependencies():
         ('jieba', 'jieba>=0.42.1'),
         ('matplotlib', 'matplotlib>=3.5.0'),  # 用于训练可视化
         ('llamafactory', 'llamafactory>=0.9.0'),  # LLMOps 训练功能必需
+        ('fastmcp', 'fastmcp>=2.0.0'),  # MCP服务器必需
     ]
     
     missing_packages = []
@@ -513,4 +514,4 @@ def main():
 
 if __name__ == "__main__":
     exit_code = main()
-    sys.exit(exit_code) 
+    sys.exit(exit_code)
