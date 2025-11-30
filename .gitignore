@@ -220,7 +220,7 @@ models/test_generated_images/
 outputs/
 
 # Screenshots and images (exclude from version control)
-*.png
+# *.png
 *.jpg
 *.jpeg
 *.gif
@@ -238,3 +238,4 @@ events.out.tfevents.*
 merges.txt
 vocab.json
 tokenizer.json 
+
